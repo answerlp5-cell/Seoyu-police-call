@@ -2,7 +2,7 @@
    GitHub Pages 프로젝트 경로(/Seoyu-police-call/)에서도 동작하도록 모든 경로는 상대경로를 사용합니다. */
 'use strict';
 
-var CACHE_NAME = 'seoyu-call-v1';
+var CACHE_NAME = 'seoyu-call-v2';
 var APP_SHELL = [
   './',
   './index.html',
