@@ -64,13 +64,17 @@ function offlineDocument() {
 }
 
 /* HTTP 캐시를 건너뛰고 네트워크에서 새 문서를 받아옵니다.
-   navigate 요청에 init을 넘기지 못하는 브라우저를 위해 실패 시 일반 fetch로 한 번 더 시도합니다. */
+   navigate 요청에 init을 넘기지 못하는 브라우저(Safari 등)를 위해 일반 fetch로 한 번 더 시도합니다. */
 function fetchFresh(request) {
+  var first;
   try {
-    return fetch(request, { cache: 'no-cache' });
+    first = Promise.resolve(fetch(request, { cache: 'no-cache' }));
   } catch (e) {
-    return fetch(request);
+    first = Promise.reject(e);
   }
+  return first.catch(function () {
+    return fetch(request);
+  });
 }
 
 /* 느린 네트워크에서 기다리지 않도록 promise에 시간 제한을 둡니다 (제한 초과 시 null) */
