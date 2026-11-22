@@ -1,8 +1,12 @@
 /* 서유의 경찰 아저씨 – 오프라인 지원 서비스 워커
-   GitHub Pages 프로젝트 경로(/Seoyu-police-call/)에서도 동작하도록 모든 경로는 상대경로를 사용합니다. */
+   GitHub Pages 프로젝트 경로(/Seoyu-police-call/)에서도 동작하도록 모든 경로는 상대경로를 사용합니다.
+
+   v4: 문서(navigate) 요청을 네트워크 우선으로 바꿔, 새 버전이 배포되면
+       홈 화면 앱에서도 다음 실행/새로고침 때 바로 최신 index.html이 보이게 합니다. */
 'use strict';
 
-var CACHE_NAME = 'seoyu-call-v3';
+var CACHE_NAME = 'seoyu-call-v4';
+var NAV_TIMEOUT = 3000; /* 문서 요청 네트워크 대기 한도(ms) – 느리면 곧바로 캐시로 폴백 */
 var APP_SHELL = [
   './',
   './index.html',
@@ -59,6 +63,34 @@ function offlineDocument() {
   );
 }
 
+/* HTTP 캐시를 건너뛰고 네트워크에서 새 문서를 받아옵니다.
+   navigate 요청에 init을 넘기지 못하는 브라우저를 위해 실패 시 일반 fetch로 한 번 더 시도합니다. */
+function fetchFresh(request) {
+  try {
+    return fetch(request, { cache: 'no-cache' });
+  } catch (e) {
+    return fetch(request);
+  }
+}
+
+/* 느린 네트워크에서 기다리지 않도록 promise에 시간 제한을 둡니다 (제한 초과 시 null) */
+function withTimeout(promise, ms) {
+  return new Promise(function (resolve) {
+    var settled = false;
+    var timer = setTimeout(function () {
+      if (settled) return;
+      settled = true;
+      resolve(null);
+    }, ms);
+    promise.then(function (value) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    });
+  });
+}
+
 self.addEventListener('fetch', function (event) {
   var request = event.request;
 
@@ -72,30 +104,33 @@ self.addEventListener('fetch', function (event) {
   }
   if (url.origin !== self.location.origin) return;
 
-  /* 페이지 이동(문서 요청): 캐시 우선 → 백그라운드 갱신 → 없으면 네트워크 */
+  /* 페이지 이동(문서 요청): 네트워크 우선 → 3초 안에 응답 없거나 실패하면 캐시 → 그것도 없으면 오프라인 안내 */
   if (request.mode === 'navigate') {
     event.respondWith(
       (async function () {
         var cache = await caches.open(CACHE_NAME);
+
+        var network = fetchFresh(request).then(async function (res) {
+          if (res && res.ok) {
+            try {
+              await cache.put('./index.html', res.clone());
+            } catch (e) {}
+          }
+          return res;
+        }).catch(function () {
+          return null;
+        });
+
+        var fresh = await withTimeout(network, NAV_TIMEOUT);
+        if (fresh && fresh.ok) return fresh;
+
         var cached = (await cache.match('./index.html')) || (await cache.match('./'));
-
-        var network = fetch(request)
-          .then(async function (res) {
-            if (res && res.ok) {
-              try {
-                await cache.put('./index.html', res.clone());
-              } catch (e) {}
-            }
-            return res;
-          })
-          .catch(function () {
-            return null;
-          });
-
         if (cached) return cached;
 
-        var fresh = await network;
-        return fresh || (await cache.match('./index.html')) || offlineDocument();
+        var late = await network;
+        if (late && late.ok) return late;
+
+        return (await cache.match('./index.html')) || offlineDocument();
       })()
     );
     return;
